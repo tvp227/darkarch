@@ -1,6 +1,8 @@
 #!/bin/bash
 
 # Dark Arch Setup Script
+# This script transforms Arch Linux into a Kali-equivalent penetration testing environment
+# with professional and aesthetically pleasing customizations called "Dark Arch"
 
 # Exit on any error
 set -e
@@ -74,11 +76,18 @@ install_aur_helper() {
     section "Installing AUR helper (yay)"
     if ! command -v yay &> /dev/null; then
         status "Installing yay AUR helper..."
-        cd /tmp
-        git clone https://aur.archlinux.org/yay.git
-        cd yay
-        makepkg -si --noconfirm
+        # Create a temporary directory
+        rm -rf /tmp/yay_install
+        mkdir -p /tmp/yay_install
+        chown -R "$SUDO_USER:$SUDO_USER" /tmp/yay_install
+        
+        # Switch to the normal user to run makepkg
+        cd /tmp/yay_install
+        sudo -u "$SUDO_USER" bash -c "git clone https://aur.archlinux.org/yay.git && cd yay && makepkg -si --noconfirm"
+        
+        # Clean up
         cd ~
+        rm -rf /tmp/yay_install
     else
         status "yay is already installed"
     fi
