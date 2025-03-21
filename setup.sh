@@ -76,17 +76,34 @@ install_aur_helper() {
     section "Installing AUR helper (yay)"
     if ! command -v yay &> /dev/null; then
         status "Installing yay AUR helper..."
+        
         # Create a temporary directory
         rm -rf /tmp/yay_install
         mkdir -p /tmp/yay_install
-        chown -R "$SUDO_USER:$SUDO_USER" /tmp/yay_install
         
-        # Switch to the normal user to run makepkg
-        cd /tmp/yay_install
-        sudo -u "$SUDO_USER" bash -c "git clone https://aur.archlinux.org/yay.git && cd yay && makepkg -si --noconfirm"
+        # Get the normal user's name from SUDO_USER or fallback to first normal user
+        NORMAL_USER=${SUDO_USER:-$(grep -E ":[0-9]{4}:" /etc/passwd | cut -d: -f1 | head -n1)}
+        
+        # Set permissions for the normal user
+        chown -R $NORMAL_USER:$NORMAL_USER /tmp/yay_install
+        
+        # Create a temporary script to run as the normal user
+        cat > /tmp/yay_install/build_yay.sh << 'EOF'
+#!/bin/bash
+cd /tmp/yay_install
+git clone https://aur.archlinux.org/yay.git
+cd yay
+makepkg -si --noconfirm
+EOF
+        
+        # Make the script executable
+        chmod +x /tmp/yay_install/build_yay.sh
+        chown $NORMAL_USER:$NORMAL_USER /tmp/yay_install/build_yay.sh
+        
+        # Run the script as the normal user
+        su - $NORMAL_USER -c "/tmp/yay_install/build_yay.sh"
         
         # Clean up
-        cd ~
         rm -rf /tmp/yay_install
     else
         status "yay is already installed"
