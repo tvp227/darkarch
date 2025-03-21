@@ -73,41 +73,86 @@ install_base_dependencies() {
 
 # Install AUR helper (yay)
 install_aur_helper() {
-    section "Installing AUR helper (yay)"
-    if ! command -v yay &> /dev/null; then
-        status "Installing yay AUR helper..."
-        
-        # Create a temporary directory
-        rm -rf /tmp/yay_install
-        mkdir -p /tmp/yay_install
-        
-        # Get the normal user's name from SUDO_USER or fallback to first normal user
-        NORMAL_USER=${SUDO_USER:-$(grep -E ":[0-9]{4}:" /etc/passwd | cut -d: -f1 | head -n1)}
-        
-        # Set permissions for the normal user
-        chown -R $NORMAL_USER:$NORMAL_USER /tmp/yay_install
-        
-        # Create a temporary script to run as the normal user
-        cat > /tmp/yay_install/build_yay.sh << 'EOF'
+    section "Installing AUR helper (yay or paru)"
+    
+    if command -v yay &> /dev/null; then
+        status "yay is already installed"
+        AUR_HELPER="yay"
+        return 0
+    fi
+    
+    if command -v paru &> /dev/null; then
+        status "paru is already installed, using it instead of yay"
+        AUR_HELPER="paru"
+        return 0
+    fi
+    
+    status "Installing AUR helper..."
+    
+    # Try to install yay from AUR manually
+    rm -rf /tmp/aur_helper_install
+    mkdir -p /tmp/aur_helper_install
+    cd /tmp/aur_helper_install
+    
+    status "Trying to install yay..."
+    pacman -S --needed --noconfirm git base-devel
+    git clone https://aur.archlinux.org/yay-bin.git
+    cd yay-bin
+    
+    # Get the normal user's name
+    NORMAL_USER=${SUDO_USER:-$(grep -E ":[0-9]{4}:" /etc/passwd | cut -d: -f1 | head -n1)}
+    chown -R $NORMAL_USER:$NORMAL_USER .
+    
+    # Create a script to build as non-root
+    cat > build_helper.sh << 'EOF'
 #!/bin/bash
-cd /tmp/yay_install
-git clone https://aur.archlinux.org/yay.git
-cd yay
+cd "$(dirname "$0")"
+makepkg -si --noconfirm
+EOF
+    
+    chmod +x build_helper.sh
+    chown $NORMAL_USER:$NORMAL_USER build_helper.sh
+    
+    # Run as normal user
+    su - $NORMAL_USER -c "/tmp/aur_helper_install/yay-bin/build_helper.sh"
+    
+    # Check if installation was successful
+    if command -v yay &> /dev/null; then
+        status "yay successfully installed"
+        AUR_HELPER="yay"
+    else
+        # Try paru as fallback
+        status "yay installation failed, trying paru instead..."
+        cd /tmp/aur_helper_install
+        git clone https://aur.archlinux.org/paru-bin.git
+        cd paru-bin
+        chown -R $NORMAL_USER:$NORMAL_USER .
+        
+        # Create build script
+        cat > build_helper.sh << 'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
 makepkg -si --noconfirm
 EOF
         
-        # Make the script executable
-        chmod +x /tmp/yay_install/build_yay.sh
-        chown $NORMAL_USER:$NORMAL_USER /tmp/yay_install/build_yay.sh
+        chmod +x build_helper.sh
+        chown $NORMAL_USER:$NORMAL_USER build_helper.sh
         
-        # Run the script as the normal user
-        su - $NORMAL_USER -c "/tmp/yay_install/build_yay.sh"
+        # Run as normal user
+        su - $NORMAL_USER -c "/tmp/aur_helper_install/paru-bin/build_helper.sh"
         
-        # Clean up
-        rm -rf /tmp/yay_install
-    else
-        status "yay is already installed"
+        if command -v paru &> /dev/null; then
+            status "paru successfully installed"
+            AUR_HELPER="paru"
+        else
+            status "Failed to install any AUR helper. Some AUR packages won't be installed."
+            AUR_HELPER="none"
+        fi
     fi
+    
+    # Clean up
+    cd ~
+    rm -rf /tmp/aur_helper_install
 }
 
 # Install BlackArch repository
@@ -210,10 +255,22 @@ install_popular_kali_tools() {
     section "Installing additional popular Kali tools"
     status "Installing must-have Kali tools..."
     
-    # Using AUR (via yay) for tools not in official repos
-    sudo -u "$SUDO_USER" yay -S --needed --noconfirm \
-        theharvester maltego bloodhound responder crackmapexec \
-        enum4linux-ng gobuster oneforall photon sherlock spiderfoot eyewitness
+    # Check if we have an AUR helper
+    if [ "$AUR_HELPER" = "none" ]; then
+        status "No AUR helper available, skipping AUR tools installation"
+        return
+    fi
+    
+    # Using AUR helper for tools not in official repos
+    if [ "$AUR_HELPER" = "yay" ]; then
+        sudo -u "$SUDO_USER" yay -S --needed --noconfirm \
+            theharvester maltego bloodhound responder crackmapexec \
+            enum4linux-ng gobuster oneforall photon sherlock spiderfoot eyewitness || true
+    elif [ "$AUR_HELPER" = "paru" ]; then
+        sudo -u "$SUDO_USER" paru -S --needed --noconfirm \
+            theharvester maltego bloodhound responder crackmapexec \
+            enum4linux-ng gobuster oneforall photon sherlock spiderfoot eyewitness || true
+    fi
 }
 
 # Install and configure desktop environment
@@ -745,6 +802,9 @@ EOF
     chown "$SUDO_USER:$SUDO_USER" "$HOME/Desktop/README.desktop"
     chmod +x "$HOME/Desktop/README.desktop"
 }
+
+# Global variable for AUR helper
+AUR_HELPER="none"
 
 # Main execution
 main() {
